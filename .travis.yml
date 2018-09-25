@@ -55,13 +55,11 @@ install:
     - if [[ "$ENABLE_XTL_COMPLEX" == 1 ]] ; then
         conda install xtl -c quantstack ;
       fi
-    - if [[ "$CROSS_COMPILE" == 1 ]] ; then
-          mkdir $HOME/linker_bin ;
-          ln -s /usr/bin/aarch64-linux-gnu-ld $HOME/linker_bin/ld ;
-          echo "SETTING GNU LINKER DIR" ;
-          ls -al $HOME/linker_bin/ld ;
-          cmake . -DBUILD_TESTS=ON -DCROSS_COMPILE_ARM=ON -DDOWNLOAD_GTEST=ON -DARM_ARCH_DIRECTORY="$ARM_ARCH_DIR" -DARM_GCC_VER="$GCC_VER" -DTARGET_ARCH="$ARM_SETTINGS --prefix=$HOME/linker_bin/" ;
-      fi
+    - mkdir $HOME/linker_bin ;
+    - ln -s /usr/bin/aarch64-linux-gnu-ld $HOME/linker_bin/ld ;
+    - echo "SETTING GNU LINKER DIR" ;
+    - ls -al $HOME/linker_bin/ld ;
+    - cmake . -DBUILD_TESTS=ON -DCROSS_COMPILE_ARM=ON -DDOWNLOAD_GTEST=ON -DARM_ARCH_DIRECTORY="$ARM_ARCH_DIR" -DARM_GCC_VER="$GCC_VER" -DTARGET_ARCH="$ARM_SETTINGS --prefix=$HOME/linker_bin/" ;
     - make -j2 jsoncons_tests
 
 script:
