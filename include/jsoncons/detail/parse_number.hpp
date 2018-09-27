@@ -25,11 +25,55 @@
 
 namespace jsoncons { namespace detail {
 
-struct to_integer_result
+struct to_int64_result
 {
     int64_t value;
     bool overflow;
 };
+
+template <class CharT>
+bool is_integer(const CharT* s, size_t length)
+{
+    const CharT* end = s + length; 
+    if (s == end)
+    {
+        return false;
+    }
+    if (*s == '-')
+    {
+        ++s;
+    }
+    if (s == end)
+    {
+        return false;
+    }
+    for (;s < end; ++s)
+    {
+        if (!(*s >= '0' && *s <= '9'))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+template <class CharT>
+bool is_uinteger(const CharT* s, size_t length)
+{
+    const CharT* end = s + length; 
+    if (s == end)
+    {
+        return false;
+    }
+    for (;s < end; ++s)
+    {
+        if (!(*s >= '0' && *s <= '9'))
+        {
+            return false;
+        }
+    }
+    return true;
+}
 
 // Precondition: s satisfies
 
@@ -39,7 +83,7 @@ struct to_integer_result
 // - digit1-digits
 
 template <class CharT>
-to_integer_result to_integer(const CharT* s, size_t length)
+to_int64_result to_int64(const CharT* s, size_t length)
 {
     JSONCONS_ASSERT(length > 0);
 
@@ -92,10 +136,10 @@ to_integer_result to_integer(const CharT* s, size_t length)
         }
     }
 
-    return to_integer_result({ n,overflow });
+    return to_int64_result({ n,overflow });
 }
 
-struct to_uinteger_result
+struct to_uint64_result
 {
     uint64_t value;
     bool overflow;
@@ -109,7 +153,7 @@ struct to_uinteger_result
 // - digit1-digits
 
 template <class CharT>
-to_uinteger_result to_uinteger(const CharT* s, size_t length)
+to_uint64_result to_uint64(const CharT* s, size_t length)
 {
     JSONCONS_ASSERT(length > 0);
 
@@ -136,7 +180,7 @@ to_uinteger_result to_uinteger(const CharT* s, size_t length)
 
         n += x;
     }
-    return to_uinteger_result{ n,overflow };
+    return to_uint64_result{ n,overflow };
 }
 
 #if defined(JSONCONS_HAS_MSC__STRTOD_L)

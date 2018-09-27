@@ -4,17 +4,24 @@ jsoncons is a C++, header-only library for constructing [JSON](http://www.json.o
 data formats such as [CBOR](http://cbor.io/). It supports 
 
 - Parsing JSON-like text or binary data into an unpacked representation
-  (`jsoncons::basic_json`) that defines an interface for accessing and modifying that data (including bignum and byte string values.)
+  (`jsoncons::basic_json`) that defines an interface for accessing and modifying that data (covers bignum and byte string values.)
 
 - Serializing the unpacked representation into different JSON-like text or binary data.
 
-- Converting from JSON-like text or binary data to C++ objects and back.
+- Converting from JSON-like text or binary data to C++ objects and back via [json_type_traits](https://github.com/danielaparker/jsoncons/blob/master/doc/ref/json_type_traits.md).
 
 - Streaming JSON read and write events, somewhat analogously to SAX (push parsing) and StAX (pull parsing) in the XML world. 
 
-It is distributed under the [Boost Software License](http://www.boost.org/users/license.html).
+Compared to other JSON libraries, jsoncons has been designed to handle very large JSON texts. At its heart are
+SAX style parsers and serializers. Its [json parser](https://github.com/danielaparker/jsoncons/blob/master/doc/ref/json_parser.md) is an 
+incremental parser that can be fed its input in chunks, and does not require an entire file to be loaded in memory at one time. 
+Its unpacked in-memory representation of JSON is more compact than most, and can be made more compact still with a user-supplied
+allocator. It also supports memory efficient parsing of very large JSON texts with a [pull parser](https://github.com/danielaparker/jsoncons/blob/master/doc/ref/json_stream_reader.md),
+built on top of its incremental parser.  
 
-jsoncons uses some features that are new to C++ 11, including [move semantics](http://thbecker.net/articles/rvalue_references/section_02.html) and the [AllocatorAwareContainer](http://en.cppreference.com/w/cpp/concept/AllocatorAwareContainer) concept. It is tested in continuous integration on AppVeyor and Travis with vs2015 and vs2017 on Windows 10, GCC 4.8 and later on Ubuntu, clang 3.8 and later on Ubuntu, and clang xcode 6.4 and later on OSX. 
+jsoncons uses some features that are new to C++ 11, including [move semantics](http://thbecker.net/articles/rvalue_references/section_02.html) and the [AllocatorAwareContainer](http://en.cppreference.com/w/cpp/concept/AllocatorAwareContainer) concept. It is tested in continuous integration on [AppVeyor](https://ci.appveyor.com/project/danielaparker/jsoncons) and [Travis](https://travis-ci.org/danielaparker/jsoncons) with vs2015 and vs2017 on Windows 10, GCC 4.8 and later on Ubuntu, clang 3.8 and later on Ubuntu, and clang xcode 6.4 and later on OSX. 
+
+jsoncons is distributed under the [Boost Software License](http://www.boost.org/users/license.html).
 
 ## Get jsoncons
 
@@ -25,7 +32,7 @@ Or, download the latest code on [master](https://github.com/danielaparker/jsonco
 ## How to use it
 
 - [Quick guide](http://danielaparker.github.io/jsoncons)
-- [FAQ](doc/FAQ.md)
+- [Examples](doc/Examples.md)
 - [Reference](doc/Home.md)
 
 As the `jsoncons` library has evolved, names have sometimes changed. To ease transition, jsoncons deprecates the old names but continues to support many of them. See the [deprecated list](doc/ref/deprecated.md) for the status of old names. The deprecated names can be suppressed by defining macro `JSONCONS_NO_DEPRECATED`, which is recommended for new code.
@@ -34,11 +41,11 @@ As the `jsoncons` library has evolved, names have sometimes changed. To ease tra
 
 [json_benchmarks](https://github.com/danielaparker/json_benchmarks) provides some measurements about how `jsoncons` compares to other `json` libraries.
 
+- [JSONTestSuite and JSON_checker test suites](https://danielaparker.github.io/json_benchmarks/) 
+
 - [Performance benchmarks with text and integers](https://github.com/danielaparker/json_benchmarks/blob/master/report/performance.md)
 
 - [Performance benchmarks with text and doubles](https://github.com/danielaparker/json_benchmarks/blob/master/report/performance_fp.md)
-
-- [JSONTestSuite and JSON_checker test suites](https://danielaparker.github.io/json_benchmarks/) 
 
 ## Extensions
 
@@ -161,16 +168,15 @@ int main()
 {
     // Construct some CBOR using the streaming API
     std::vector<uint8_t> b;
-    cbor::cbor_bytes_serializer bserializer(b);
-    bserializer.begin_document();
-    bserializer.begin_array(); // indefinite length array
-    bserializer.begin_array(3); // fixed length array
-    bserializer.string_value("Toronto");
-    bserializer.byte_string_value({'H','e','l','l','o'});
-    bserializer.bignum_value("-18446744073709551617");
-    bserializer.end_array();
-    bserializer.end_array();
-    bserializer.end_document();
+    cbor::cbor_bytes_serializer bwriter(b);
+    bwriter.begin_array(); // indefinite length array
+    bwriter.begin_array(3); // fixed length array
+    bwriter.string_value("Toronto");
+    bwriter.byte_string_value({'H','e','l','l','o'});
+    bwriter.bignum_value("-18446744073709551617");
+    bwriter.end_array();
+    bwriter.end_array();
+    bwriter.flush();
 
     // Print bytes
     std::cout << "(1)\n";
@@ -430,18 +436,17 @@ int main()
     )");
 
     json_serializer serializer(std::cout, jsoncons::indenting::indent); // pretty print
-    serializer.begin_document();
     serializer.begin_array();
     for (const auto& book : some_books.array_range())
     {
-        book.dump_fragment(serializer);
+        book.dump(serializer);
     }
     for (const auto& book : more_books.array_range())
     {
-        book.dump_fragment(serializer);
+        book.dump(serializer);
     }
     serializer.end_array();
-    serializer.end_document();
+    serializer.flush();
 }
 ```
 Output:
@@ -473,7 +478,7 @@ Output:
 ### Pull parser example
 
 ```c++
-#include <jsoncons/json_event_reader.hpp>
+#include <jsoncons/json_stream_reader.hpp>
 #include <string>
 #include <sstream>
 
@@ -504,21 +509,24 @@ int main()
 
     std::istringstream is(s);
 
-    json_event_reader event_reader(is);
+    json_stream_reader reader(is);
 
-    for (; !event_reader.done(); event_reader.next())
+    for (; !reader.done(); reader.next())
     {
-        const auto& event = event_reader.current();
+        const auto& event = reader.current();
         switch (event.event_type())
         {
-            case json_event_type::name:
-                std::cout << event.as<std::string>() << ": ";
+            case stream_event_type::name:
+                // Returned data is string, so can use as<jsoncons::string_view>()>()
+                std::cout << event.as<jsoncons::string_view>() << ": ";
                 break;
-            case json_event_type::string_value:
-                std::cout << event.as<std::string>() << "\n";
+            case stream_event_type::string_value:
+                // Can use as<std::string_view>() if your compiler supports it
+                std::cout << event.as<jsoncons::string_view>() << "\n";
                 break;
-            case json_event_type::int64_value:
-            case json_event_type::uint64_value:
+            case stream_event_type::int64_value:
+            case stream_event_type::uint64_value:
+                // Converts integer value to std::string
                 std::cout << event.as<std::string>() << "\n";
                 break;
         }
@@ -541,7 +549,7 @@ lastName: Skeleton
 mark: 60
 ```
 
-See [json_event_reader](doc/ref/json_event_reader.md)
+See [json_stream_reader](doc/ref/json_stream_reader.md) 
 
 ## Building the test suite and examples with CMake
 

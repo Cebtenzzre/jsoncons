@@ -65,19 +65,19 @@ public:
     {
         if (can_read_nan_replacement_ && s == nan_replacement_.substr(1,nan_replacement_.length()-2))
         {
-            this->downstream_handler().double_value(std::nan(""), context);
+            this->destination_handler().double_value(std::nan(""), context);
         }
         else if (can_read_pos_inf_replacement_ && s == pos_inf_replacement_.substr(1,pos_inf_replacement_.length()-2))
         {
-            this->downstream_handler().double_value(std::numeric_limits<double>::infinity(), context);
+            this->destination_handler().double_value(std::numeric_limits<double>::infinity(), context);
         }
         else if (can_read_neg_inf_replacement_ && s == neg_inf_replacement_.substr(1,neg_inf_replacement_.length()-2))
         {
-            this->downstream_handler().double_value(-std::numeric_limits<double>::infinity(), context);
+            this->destination_handler().double_value(-std::numeric_limits<double>::infinity(), context);
         }
         else
         {
-            this->downstream_handler().string_value(s, context);
+            this->destination_handler().string_value(s, context);
         }
         return true;
     }
@@ -89,9 +89,7 @@ enum class parse_state : uint8_t
 {
     root,
     start, 
-    begin_document, 
-    before_end_document, 
-    end_document, 
+    before_done, 
     slash,  
     slash_slash, 
     slash_star, 
@@ -184,6 +182,7 @@ class basic_json_parser : private serializing_context
     typedef typename std::allocator_traits<allocator_type>:: template rebind_alloc<parse_state> parse_state_allocator_type;
     std::vector<parse_state,parse_state_allocator_type> state_stack_;
     bool continue_;
+    bool done_;
 
     // Noncopyable and nonmoveable
     basic_json_parser(const basic_json_parser&) = delete;
@@ -247,7 +246,8 @@ public:
          input_end_(nullptr),
          input_ptr_(nullptr),
          state_(parse_state::start),
-         continue_(true)
+         continue_(true),
+         done_(false)
     {
         string_buffer_.reserve(initial_string_buffer_capacity_);
         number_buffer_.reserve(initial_number_buffer_capacity_);
@@ -299,7 +299,7 @@ public:
 
     bool done() const
     {
-        return state_ == parse_state::done;
+        return done_;
     }
 
     bool stopped() const
@@ -307,23 +307,78 @@ public:
         return !continue_;
     }
 
+    void skip_space()
+    {
+        const CharT* local_input_end = input_end_;
+        while (input_ptr_ != local_input_end) 
+        {
+            switch (*input_ptr_)
+            {
+                case ' ':
+                case '\t':
+                    ++input_ptr_;
+                    ++column_;                     
+                    break;
+                case '\r': 
+                    push_state(state_);
+                    ++input_ptr_;
+                    ++column_;
+                    state_ = parse_state::cr;
+                    return; 
+                case '\n': 
+                    ++input_ptr_;
+                    ++column_;
+                    push_state(state_);
+                    state_ = parse_state::lf;
+                    return;   
+                default:
+                    return;
+            }
+        }
+    }
+
     void skip_whitespace()
     {
         const CharT* local_input_end = input_end_;
-        for (;;) 
+
+        while (input_ptr_ != local_input_end) 
         {
-            if (JSONCONS_UNLIKELY(input_ptr_ == local_input_end)) 
+            switch (state_)
             {
-                return;
-            } 
-            else if (*input_ptr_ == ' ' || *input_ptr_ == '\t') 
-            {
-                ++input_ptr_;
-                ++column_;                     
-            } 
-            else 
-            {
-                return;
+                case parse_state::cr:
+                    ++line_;
+                    column_ = 1;
+                    switch (*input_ptr_)
+                    {
+                    case '\n':
+                        state_ = pop_state();
+                        ++input_ptr_;
+                        break;
+                    default:
+                        state_ = pop_state();
+                        break;
+                    }
+                    break;
+
+                case parse_state::lf:
+                    ++line_;
+                    column_ = 1;
+                    state_ = pop_state();
+                    break;
+
+                default:
+                    switch (*input_ptr_)
+                    {
+                        case ' ':
+                        case '\t':
+                        case '\n':
+                        case '\r':
+                            skip_space();
+                            break;
+                        default:
+                            return;
+                    }
+                    break;
             }
         }
     }
@@ -376,7 +431,7 @@ public:
 
         if (parent() == parse_state::root)
         {
-            state_ = parse_state::before_end_document;
+            state_ = parse_state::before_done;
         }
         else
         {
@@ -431,7 +486,7 @@ public:
         }
         if (parent() == parse_state::root)
         {
-            state_ = parse_state::before_end_document;
+            state_ = parse_state::before_done;
         }
         else
         {
@@ -446,6 +501,7 @@ public:
         push_state(parse_state::root);
         state_ = parse_state::start;
         continue_ = true;
+        done_ = false;
         line_ = 1;
         column_ = 1;
         nesting_depth_ = 0;
@@ -468,7 +524,7 @@ public:
 
     void check_done(std::error_code& ec)
     {
-        if (state_ != parse_state::done)
+        if (!done_)
         {
             continue_ = err_handler_.error(json_parse_errc::unexpected_eof, *this);
             if (!continue_)
@@ -520,16 +576,24 @@ public:
                     end_fraction_value(chars_format::scientific,ec);
                     if (ec) return;
                     break;
-                case parse_state::before_end_document:
-                    handler_.end_document();
+                case parse_state::before_done:
+                    handler_.flush();
+                    done_ = true;
                     state_ = parse_state::done;
                     continue_ = false;
                     break;
-                case parse_state::end_document:
-                    state_ = parse_state::done;
+                case parse_state::done:
                     continue_ = false;
+                    break;
+                //case parse_state::start:
+                //    continue_ = false;
+                //    break;
+                case parse_state::cr:
+                case parse_state::lf:
+                    state_ = pop_state();
                     break;
                 default:
+                    //std::cout << "state: " << (int) state_ << "\n";
                     err_handler_.fatal_error(json_parse_errc::unexpected_eof, *this);
                     ec = json_parse_errc::unexpected_eof;
                     continue_ = false;
@@ -541,11 +605,9 @@ public:
         {
             switch (state_)
             {
-            case parse_state::before_end_document:
-                continue_ = handler_.end_document();
-                state_ = parse_state::end_document;
-                break;
-            case parse_state::end_document:
+            case parse_state::before_done:
+                handler_.flush();
+                done_ = true;
                 state_ = parse_state::done;
                 continue_ = false;
                 break;
@@ -569,14 +631,7 @@ public:
                 state_ = pop_state();
                 break;
             case parse_state::start: 
-                continue_ = handler_.begin_document();
-                state_ = parse_state::begin_document;
-                if (!continue_)
-                    break;
-                // FALLTHRU
-            case parse_state::begin_document: 
                 {
-                    handler_.begin_document();
                     switch (*input_ptr_)
                     {
                         JSONCONS_ILLEGAL_CONTROL_CHARACTER:
@@ -600,7 +655,7 @@ public:
                             state_ = parse_state::lf;
                             break;   
                         case ' ':case '\t':
-                            skip_whitespace();
+                            skip_space();
                             break;
                         case '/': 
                             ++input_ptr_;
@@ -715,7 +770,7 @@ public:
                             state_ = parse_state::lf;
                             break;   
                         case ' ':case '\t':
-                            skip_whitespace();
+                            skip_space();
                             break;
                         case '/':
                             ++input_ptr_;
@@ -793,7 +848,7 @@ public:
                             state_ = parse_state::lf;
                             break;   
                         case ' ':case '\t':
-                            skip_whitespace();
+                            skip_space();
                             break;
                         case '/':
                             ++input_ptr_;
@@ -865,7 +920,7 @@ public:
                             state_ = parse_state::lf;
                             break;   
                         case ' ':case '\t':
-                            skip_whitespace();
+                            skip_space();
                             break;
                         case '/': 
                             ++input_ptr_;
@@ -943,7 +998,7 @@ public:
                             ++column_;
                             break;   
                         case ' ':case '\t':
-                            skip_whitespace();
+                            skip_space();
                             break;
                         case '/': 
                             push_state(state_);
@@ -997,7 +1052,7 @@ public:
                             state_ = parse_state::lf;
                             break;   
                         case ' ':case '\t':
-                            skip_whitespace();
+                            skip_space();
                             break;
                         case '/': 
                             push_state(state_);
@@ -1140,7 +1195,7 @@ public:
                             state_ = parse_state::lf;
                             break;   
                         case ' ':case '\t':
-                            skip_whitespace();
+                            skip_space();
                             break;
                         case '/': 
                             ++input_ptr_;
@@ -1301,7 +1356,7 @@ public:
                     continue_ = handler_.bool_value(true,*this);
                     if (parent() == parse_state::root)
                     {
-                        state_ = parse_state::before_end_document;
+                        state_ = parse_state::before_done;
                     }
                     else
                     {
@@ -1369,7 +1424,7 @@ public:
                     continue_ = handler_.bool_value(false,*this);
                     if (parent() == parse_state::root)
                     {
-                        state_ = parse_state::before_end_document;
+                        state_ = parse_state::before_done;
                     }
                     else
                     {
@@ -1422,7 +1477,7 @@ public:
                     continue_ = handler_.null_value(*this);
                     if (parent() == parse_state::root)
                     {
-                        state_ = parse_state::before_end_document;
+                        state_ = parse_state::before_done;
                     }
                     else
                     {
@@ -1542,7 +1597,7 @@ public:
                 column_ += 4;
                 if (parent() == parse_state::root)
                 {
-                    state_ = parse_state::before_end_document;
+                    state_ = parse_state::before_done;
                 }
                 else
                 {
@@ -1576,7 +1631,7 @@ public:
                 column_ += 4;
                 if (parent() == parse_state::root)
                 {
-                    state_ = parse_state::before_end_document;
+                    state_ = parse_state::before_done;
                 }
                 else
                 {
@@ -1610,7 +1665,7 @@ public:
                 column_ += 5;
                 if (parent() == parse_state::root)
                 {
-                    state_ = parse_state::before_end_document;
+                    state_ = parse_state::before_done;
                 }
                 else
                 {
@@ -1711,7 +1766,7 @@ zero:
             case ' ':case '\t':
                 end_integer_value(ec);
                 if (ec) return;
-                skip_whitespace();
+                skip_space();
                 return;
             case '/': 
                 end_integer_value(ec);
@@ -1790,7 +1845,7 @@ integer:
             case ' ':case '\t':
                 end_integer_value(ec);
                 if (ec) return;
-                skip_whitespace();
+                skip_space();
                 return;
             case '/': 
                 end_integer_value(ec);
@@ -1891,7 +1946,7 @@ fraction2:
             case ' ':case '\t':
                 end_fraction_value(chars_format::fixed,ec);
                 if (ec) return;
-                skip_whitespace();
+                skip_space();
                 return;
             case '/': 
                 end_fraction_value(chars_format::fixed,ec);
@@ -2015,7 +2070,7 @@ exp3:
             case ' ':case '\t':
                 end_fraction_value(chars_format::scientific,ec);
                 if (ec) return;
-                skip_whitespace();
+                skip_space();
                 return;
             case '/': 
                 end_fraction_value(chars_format::scientific,ec);
@@ -2590,43 +2645,9 @@ escape_u9:
 
     void end_parse(std::error_code& ec)
     {
-        if (continue_)
+        while (continue_)
         {
-            switch (state_)
-            {
-                case parse_state::zero:  
-                case parse_state::integer:
-                    end_integer_value(ec);
-                    if (ec) return;
-                    break;
-                case parse_state::fraction2:
-                    end_fraction_value(chars_format::fixed,ec);
-                    if (ec) return;
-                    break;
-                case parse_state::exp3:
-                    end_fraction_value(chars_format::scientific,ec);
-                    if (ec) return;
-                    break;
-                default:
-                    break;
-            }
-            switch (state_)
-            {
-                case parse_state::before_end_document:
-                    handler_.end_document();
-                    state_ = parse_state::done;
-                    continue_ = false;
-                    break;
-                case parse_state::end_document:
-                    state_ = parse_state::done;
-                    continue_ = false;
-                    break;
-                default:
-                    err_handler_.fatal_error(json_parse_errc::unexpected_eof, *this);
-                    ec = json_parse_errc::unexpected_eof;
-                    continue_ = false;
-                    return;
-            }
+            parse_some(ec);
         }
     }
 
@@ -2671,7 +2692,7 @@ private:
 
     void end_negative_value(std::error_code& ec)
     {
-        jsoncons::detail::to_integer_result result = jsoncons::detail::to_integer(number_buffer_.data(), number_buffer_.length());
+        jsoncons::detail::to_int64_result result = jsoncons::detail::to_int64(number_buffer_.data(), number_buffer_.length());
         if (!result.overflow)
         {
             continue_ = handler_.int64_value(result.value, *this);
@@ -2691,7 +2712,7 @@ private:
 
     void end_positive_value(std::error_code& ec)
     {
-        jsoncons::detail::to_uinteger_result result = jsoncons::detail::to_uinteger(number_buffer_.data(), number_buffer_.length());
+        jsoncons::detail::to_uint64_result result = jsoncons::detail::to_uint64(number_buffer_.data(), number_buffer_.length());
         if (!result.overflow)
         {
             continue_ = handler_.uint64_value(result.value, *this);
@@ -2797,7 +2818,7 @@ private:
             break;
         case parse_state::root:
             continue_ = handler_.string_value(string_view_type(s, length), *this);
-            state_ = parse_state::before_end_document;
+            state_ = parse_state::before_done;
             break;
         default:
             continue_ = err_handler_.error(json_parse_errc::invalid_json_text, *this);
@@ -2842,7 +2863,7 @@ private:
             state_ = parse_state::expect_comma_or_end;
             break;
         case parse_state::root:
-            state_ = parse_state::before_end_document;
+            state_ = parse_state::before_done;
             break;
         default:
             continue_ = err_handler_.error(json_parse_errc::invalid_json_text, *this);

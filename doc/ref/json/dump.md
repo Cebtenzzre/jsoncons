@@ -1,4 +1,4 @@
-### `jsoncons::json::dump`, `jsoncons::json::dump_fragment`
+### `jsoncons::json::dump`
 
 ```c++
 template <class SAllocator>
@@ -26,8 +26,6 @@ void dump(std::ostream<CharT> os, const json_serializing_options& options) const
 void dump(std::ostream<CharT> os, const json_serializing_options& options, indenting line_indent) const; // (8)
 
 void dump(basic_json_content_handler<char_type>& content_handler) const; // (9)
-
-void dump_fragment(json_content_handler& handler) const; // (10)
 ```
 
 (1) Dumps json value to string using default json_serializing_options.
@@ -46,9 +44,7 @@ void dump_fragment(json_content_handler& handler) const; // (10)
 
 (8) Dumps json value to stream using the specified [json_serializing_options](../json_serializing_options.md) and [indenting](../indenting.md). 
 
-(9) Calls `begin_document()` on [json_content_handler](../json_content_handler.md), emits json value to the [json_content_handler](../json_content_handler.md), and calls `end_document()` on [json_content_handler](../json_content_handler.md). 
-
-(10) Emits json value to the [json_content_handler](../json_content_handler.md) (does not call `begin_document()` or `end_document()`.)
+(9) Emits json value to the [json_content_handler](../json_content_handler.md).
 
 ### Examples
 
@@ -139,18 +135,17 @@ int main()
     )");
 
     json_serializer serializer(std::cout, jsoncons::indenting::indent); // pretty print
-    serializer.begin_document();
     serializer.begin_array();
     for (const auto& book : some_books.array_range())
     {
-        book.dump_fragment(serializer);
+        book.dump(serializer);
     }
     for (const auto& book : more_books.array_range())
     {
-        book.dump_fragment(serializer);
+        book.dump(serializer);
     }
     serializer.end_array();
-    serializer.end_document();
+    serializer.flush();
 }
 ```
 

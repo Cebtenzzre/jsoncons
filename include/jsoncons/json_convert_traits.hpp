@@ -69,14 +69,13 @@ struct json_convert_traits<T,
     template <class CharT>
     static void encode(const T& val, basic_json_content_handler<CharT>& serializer)
     {
-        serializer.begin_document();
         serializer.begin_array();
         for (auto it = std::begin(val); it != std::end(val); ++it)
         {
             json_convert_traits<value_type>::encode(*it,serializer);
         }
         serializer.end_array();
-        serializer.end_document();
+        serializer.flush();
     }
 };
 
@@ -98,21 +97,20 @@ struct json_convert_traits<std::array<T,N>>
     template <class CharT>
     static void encode(const std::array<T, N>& val, std::basic_string<CharT>& s)
     {
-        basic_json_serializer<CharT,detail::string_writer<CharT>> serializer(s);
+        basic_json_serializer<CharT,detail::string_writer<std::basic_string<CharT>>> serializer(s);
         encode(val,serializer);
     }
 
     template <class CharT>
     static void encode(const std::array<T, N>& val, basic_json_content_handler<CharT>& serializer)
     {
-        serializer.begin_document();
         serializer.begin_array();
         for (auto it = std::begin(val); it != std::end(val); ++it)
         {
             json_convert_traits<value_type>::encode(*it,serializer);
         }
         serializer.end_array();
-        serializer.end_document();
+        serializer.flush();
     }
 };
 
@@ -137,7 +135,6 @@ struct json_convert_traits<T,
     template <class CharT>
     static void encode(const T& val, basic_json_content_handler<CharT>& serializer)
     {
-        serializer.begin_document();
         serializer.begin_object();
         for (auto it = std::begin(val); it != std::end(val); ++it)
         {
@@ -145,7 +142,7 @@ struct json_convert_traits<T,
             json_convert_traits<mapped_type>::encode(it->second,serializer);
         }
         serializer.end_object();
-        serializer.end_document();
+        serializer.flush();
     }
 };
 
@@ -237,16 +234,17 @@ T decode_json(std::basic_istringstream<CharT>& is,
 template <class T, class CharT>
 void encode_json(const T& val, basic_json_content_handler<CharT>& handler)
 {
-    handler.begin_document();
     json_convert_traits<T>::encode(val,handler);
-    handler.end_document();
+    handler.flush();
 }
 
+#if !defined(JSONCONS_NO_DEPRECATED)
 template <class T, class CharT>
 void encode_fragment(const T& val, basic_json_content_handler<CharT>& handler)
 {
     json_convert_traits<T>::encode(val,handler);
 }
+#endif
 
 template <class T, class CharT>
 void encode_json(const T& val, std::basic_ostream<CharT>& os)
@@ -281,7 +279,7 @@ void encode_json(const T& val, const basic_json_serializing_options<CharT>& opti
 template <class T, class CharT>
 void encode_json(const T& val, std::basic_string<CharT>& s)
 {
-    basic_json_serializer<CharT,detail::string_writer<CharT>> serializer(s);
+    basic_json_serializer<CharT,detail::string_writer<std::basic_string<CharT>>> serializer(s);
     encode_json(val, serializer);
 }
 
@@ -289,20 +287,20 @@ template <class T, class CharT>
 void encode_json(const T& val, const basic_json_serializing_options<CharT>& options,
           std::basic_string<CharT>& s)
 {
-    basic_json_serializer<CharT,detail::string_writer<CharT>> serializer(s, options);
+    basic_json_serializer<CharT,detail::string_writer<std::basic_string<CharT>>> serializer(s, options);
     encode_json(val, serializer);
 }
 
 template <class T, class CharT>
 void encode_json(const T& val, std::basic_string<CharT>& s, indenting line_indent)
 {
-    basic_json_serializer<CharT,detail::string_writer<CharT>> serializer(s, line_indent);
+    basic_json_serializer<CharT,detail::string_writer<std::basic_string<CharT>>> serializer(s, line_indent);
     encode_json(val, serializer);
 }
 
 template <class T, class CharT>
 void encode_json(const T& val, const basic_json_serializing_options<CharT>& options,
-          std::basic_string<CharT,detail::string_writer<CharT>>& s, indenting line_indent)
+          std::basic_string<CharT,detail::string_writer<std::basic_string<CharT>>>& s, indenting line_indent)
 {
     basic_json_serializer<CharT> serializer(s, options, line_indent);
     encode_json(val, serializer);

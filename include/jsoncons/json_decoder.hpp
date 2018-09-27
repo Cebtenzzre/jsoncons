@@ -35,7 +35,7 @@ public:
     typedef typename array::allocator_type json_array_allocator;
     typedef typename object::allocator_type json_object_allocator;
     typedef typename std::allocator_traits<json_allocator_type>:: template rebind_alloc<uint8_t> json_byte_allocator_type;
-
+private:
     json_string_allocator string_allocator_;
     json_object_allocator object_allocator_;
     json_array_allocator array_allocator_;
@@ -64,10 +64,12 @@ public:
         Json value_;
     };
 
+    enum class structure_type {root_t, array_t, object_t};
+
     struct structure_offset
     {
         size_t offset_;
-        bool is_object_;
+        structure_type type_;
     };
 
     typedef Allocator allocator_type;
@@ -87,8 +89,9 @@ public:
           is_valid_(false) 
 
     {
-        stack_offsets_.reserve(100);
         stack_.reserve(1000);
+        stack_offsets_.reserve(100);
+        stack_offsets_.push_back({0,structure_type::root_t});
     }
 
     bool is_valid() const
@@ -111,87 +114,61 @@ public:
 
 private:
 
-    void push_object()
+    void do_flush() override
     {
-        if (stack_offsets_.back().is_object_)
-        {
-            stack_.back().value_ = Json(object(object_allocator_));
-        }
-        else
-        {
-            stack_.push_back(Json(object(object_allocator_)));
-        }
-        stack_offsets_.push_back({stack_.size()-1,true});
-    }
-
-    void pop_object()
-    {
-        stack_.erase(stack_.begin()+stack_offsets_.back().offset_+1, stack_.end());
-        stack_offsets_.pop_back();
-    }
-
-    void push_array()
-    {
-        if (stack_offsets_.back().is_object_)
-        {
-            stack_.back().value_ = Json(array(array_allocator_));
-        }
-        else
-        {
-            stack_.push_back(Json(array(array_allocator_)));
-        }
-        stack_offsets_.push_back({stack_.size()-1,false});
-    }
-
-    void pop_array()
-    {
-        stack_.erase(stack_.begin()+stack_offsets_.back().offset_+1, stack_.end());
-        stack_offsets_.pop_back();
-    }
-
-    bool do_begin_document() override
-    {
-        stack_offsets_.clear();
-        stack_.clear();
-        stack_offsets_.push_back({0,false});
-        is_valid_ = false;
-        return true;
-    }
-
-    bool do_end_document() override
-    {
-        if (stack_.size() == 1)
-        {
-            result_.swap(stack_.front().value_);
-            stack_.pop_back();
-            is_valid_ = true;
-        }
-        return true;
     }
 
     bool do_begin_object(const serializing_context&) override
     {
-        push_object();
+        switch (stack_offsets_.back().type_)
+        {
+            case structure_type::object_t:
+                stack_.back().value_ = Json(object(object_allocator_));
+                break;
+            case structure_type::array_t:
+                stack_.push_back(Json(object(object_allocator_)));
+                break;
+            default:
+                stack_.clear();
+                is_valid_ = false;
+                stack_.push_back(Json(object(object_allocator_)));
+                result_ = Json(object(object_allocator_));
+                break;
+        }
+        stack_offsets_.push_back({stack_.size()-1,structure_type::object_t});
         return true;
     }
 
     bool do_end_object(const serializing_context&) override
     {
         end_structure();
-        pop_object();
         return true;
     }
 
     bool do_begin_array(const serializing_context&) override
     {
-        push_array();
+        switch (stack_offsets_.back().type_)
+        {
+            case structure_type::object_t:
+                stack_.back().value_ = Json(array(array_allocator_));
+                break;
+            case structure_type::array_t:
+                stack_.push_back(Json(array(array_allocator_)));
+                break;
+            default:
+                stack_.clear();
+                is_valid_ = false;
+                stack_.push_back(Json(array(array_allocator_)));
+                result_ = Json(array(array_allocator_));
+                break;
+        }
+        stack_offsets_.push_back({stack_.size()-1,structure_type::array_t});
         return true;
     }
 
     bool do_end_array(const serializing_context&) override
     {
         end_structure();
-        pop_array();
         return true;
     }
 
@@ -204,22 +181,36 @@ private:
 
         auto first = stack_.begin() + (structure_index+1);
         auto last = first + count;
-        if (stack_offsets_.back().is_object_)
+
+        switch (stack_offsets_.back().type_)
         {
-            stack_[structure_index].value_.object_value().insert(
-                std::make_move_iterator(first),
-                std::make_move_iterator(last),
-                [](stack_item&& val){return key_value_pair_type(std::move(val.name_),std::move(val.value_));});
+            case structure_type::object_t:
+                {
+                    stack_[structure_index].value_.object_value().insert(
+                        std::make_move_iterator(first),
+                        std::make_move_iterator(last),
+                        [](stack_item&& val){return key_value_pair_type(std::move(val.name_),std::move(val.value_));});
+                }
+                break;
+            default:
+                {
+                    auto& j = stack_[structure_index].value_;
+                    j.reserve(count);
+                    while (first != last)
+                    {
+                        j.push_back(std::move(first->value_));
+                        ++first;
+                    }
+                }
+                break;
         }
-        else
+        stack_.erase(stack_.begin()+stack_offsets_.back().offset_+1, stack_.end());
+        stack_offsets_.pop_back();
+        if (stack_offsets_.back().type_ == structure_type::root_t)
         {
-            auto& j = stack_[structure_index].value_;
-            j.reserve(count);
-            while (first != last)
-            {
-                j.push_back(std::move(first->value_));
-                ++first;
-            }
+            result_.swap(stack_.front().value_);
+            stack_.pop_back();
+            is_valid_ = true;
         }
     }
 
@@ -231,26 +222,36 @@ private:
 
     bool do_string_value(const string_view_type& val, const serializing_context&) override
     {
-        if (stack_offsets_.back().is_object_)
+        switch (stack_offsets_.back().type_)
         {
-            stack_.back().value_ = Json(val.data(),val.length(),string_allocator_);
-        }
-        else
-        {
-            stack_.push_back(Json(val.data(),val.length(),string_allocator_));
+            case structure_type::object_t:
+                stack_.back().value_ = Json(val.data(),val.length(),string_allocator_);
+                break;
+            case structure_type::array_t:
+                stack_.push_back(Json(val.data(),val.length(),string_allocator_));
+                break;
+            default:
+                result_ = Json(val.data(),val.length(),string_allocator_);
+                is_valid_ = true;
+                break;
         }
         return true;
     }
 
     bool do_byte_string_value(const uint8_t* data, size_t length, const serializing_context&) override
     {
-        if (stack_offsets_.back().is_object_)
+        switch (stack_offsets_.back().type_)
         {
-            stack_.back().value_ = Json(byte_string_view(data,length),string_allocator_);
-        }
-        else
-        {
-            stack_.push_back(Json(byte_string_view(data,length),string_allocator_));
+            case structure_type::object_t:
+                stack_.back().value_ = Json(byte_string_view(data,length),byte_allocator_);
+                break;
+            case structure_type::array_t:
+                stack_.push_back(Json(byte_string_view(data,length),byte_allocator_));
+                break;
+            default:
+                result_ = Json(byte_string_view(data,length),byte_allocator_);
+                is_valid_ = true;
+                break;
         }
         return true;
     }
@@ -258,78 +259,108 @@ private:
     bool do_bignum_value(const string_view_type& value, const serializing_context&) override
     {
         basic_bignum<json_byte_allocator_type> n(value.data(), value.length());
-        if (stack_offsets_.back().is_object_)
+        switch (stack_offsets_.back().type_)
         {
-            stack_.back().value_ = Json(n);
-        }
-        else
-        {
-            stack_.push_back(Json(basic_bignum<json_byte_allocator_type>(value.data(), value.length())));
+            case structure_type::object_t:
+                stack_.back().value_ = Json(n);
+                break;
+            case structure_type::array_t:
+                stack_.push_back(Json(basic_bignum<json_byte_allocator_type>(value.data(), value.length())));
+                break;
+            default:
+                result_ = Json(basic_bignum<json_byte_allocator_type>(value.data(), value.length()));
+                is_valid_ = true;
+                break;
         }
         return true;
     }
 
     bool do_int64_value(int64_t value, const serializing_context&) override
     {
-        if (stack_offsets_.back().is_object_)
+        switch (stack_offsets_.back().type_)
         {
-            stack_.back().value_ = value;
-        }
-        else
-        {
-            stack_.push_back(Json(value));
+            case structure_type::object_t:
+                stack_.back().value_ = value;
+                break;
+            case structure_type::array_t:
+                stack_.push_back(Json(value));
+                break;
+            default:
+                result_ = Json(value);
+                is_valid_ = true;
+                break;
         }
         return true;
     }
 
     bool do_uint64_value(uint64_t value, const serializing_context&) override
     {
-        if (stack_offsets_.back().is_object_)
+        switch (stack_offsets_.back().type_)
         {
-            stack_.back().value_ = value;
-        }
-        else
-        {
-            stack_.push_back(Json(value));
+            case structure_type::object_t:
+                stack_.back().value_ = value;
+                break;
+            case structure_type::array_t:
+                stack_.push_back(Json(value));
+                break;
+            default:
+                result_ = Json(value);
+                is_valid_ = true;
+                break;
         }
         return true;
     }
 
     bool do_double_value(double value, const floating_point_options& fmt, const serializing_context&) override
     {
-        if (stack_offsets_.back().is_object_)
+        switch (stack_offsets_.back().type_)
         {
-            stack_.back().value_ = Json(value,fmt);
-        }
-        else
-        {
-            stack_.push_back(Json(value,fmt));
+            case structure_type::object_t:
+                stack_.back().value_ = Json(value, fmt);
+                break;
+            case structure_type::array_t:
+                stack_.push_back(Json(value, fmt));
+                break;
+            default:
+                result_ = Json(value, fmt);
+                is_valid_ = true;
+                break;
         }
         return true;
     }
 
     bool do_bool(bool value, const serializing_context&) override
     {
-        if (stack_offsets_.back().is_object_)
+        switch (stack_offsets_.back().type_)
         {
-            stack_.back().value_ = value;
-        }
-        else
-        {
-            stack_.push_back(Json(value));
+            case structure_type::object_t:
+                stack_.back().value_ = value;
+                break;
+            case structure_type::array_t:
+                stack_.push_back(Json(value));
+                break;
+            default:
+                result_ = Json(value);
+                is_valid_ = true;
+                break;
         }
         return true;
     }
 
     bool do_null_value(const serializing_context&) override
     {
-        if (stack_offsets_.back().is_object_)
+        switch (stack_offsets_.back().type_)
         {
-            stack_.back().value_ = Json::null();
-        }
-        else
-        {
-            stack_.push_back(Json(Json::null()));
+            case structure_type::object_t:
+                stack_.back().value_ = Json::null();
+                break;
+            case structure_type::array_t:
+                stack_.push_back(Json(Json::null()));
+                break;
+            default:
+                result_ = Json(Json::null());
+                is_valid_ = true;
+                break;
         }
         return true;
     }

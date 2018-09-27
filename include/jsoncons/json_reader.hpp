@@ -54,14 +54,9 @@ public:
 
 private:
 
-    bool do_begin_document() override
+    void do_flush() override
     {
-        return other_handler_.begin_document();
-    }
-
-    bool do_end_document() override
-    {
-        return other_handler_.end_document();
+        other_handler_.flush();
     }
 
     bool do_begin_object(const serializing_context& context) override
@@ -296,12 +291,37 @@ public:
                 }
                 else
                 {
-                    parser_.update(buffer_.data(),0);
                     eof_ = true;
                 }
             }
             parser_.parse_some(ec);
             if (ec) return;
+        }
+        
+        while (!eof_)
+        {
+            parser_.skip_whitespace();
+            if (parser_.source_exhausted())
+            {
+                if (!is_.eof())
+                {
+                    if (is_.fail())
+                    {
+                        ec = json_parse_errc::source_error;
+                        return;
+                    }        
+                    read_buffer(ec);
+                    if (ec) return;
+                }
+                else
+                {
+                    eof_ = true;
+                }
+            }
+            else
+            {
+                break;
+            }
         }
     }
 

@@ -28,24 +28,29 @@
 ### Preliminaries
 
 jsoncons is a C++, header-only library for constructing [JSON](http://www.json.org) and JSON-like
-data formats (e.g. CBOR). It supports 
+data formats such as [CBOR](http://cbor.io/). It supports 
 
 - Parsing JSON-like text or binary data into an unpacked representation
-  that defines an interface for accessing and modifying that data.
+  (`jsoncons::basic_json`) that defines an interface for accessing and modifying that data (covers bignum and byte string values.)
 
 - Serializing the unpacked representation into different JSON-like text or binary data.
 
-- Converting from JSON-like text or binary data to C++ objects and back.
+- Converting from JSON-like text or binary data to C++ objects and back via [json_type_traits](https://github.com/danielaparker/jsoncons/blob/master/doc/ref/json_type_traits.md).
 
-- Streaming JSON read and write events, somewhat analogously to SAX processing in the XML world. 
+- Streaming JSON read and write events, somewhat analogously to SAX (push parsing) and StAX (pull parsing) in the XML world. 
 
-For more information, consult the latest [documentation](https://github.com/danielaparker/jsoncons/blob/master/doc/Home.md) and [roadmap](https://github.com/danielaparker/jsoncons/blob/master/doc/Roadmap.md). 
-
-jsoncons uses some features that are new to C++ 11, particularly [move semantics](http://thbecker.net/articles/rvalue_references/section_02.html) and the [AllocatorAwareContainer](http://en.cppreference.com/w/cpp/concept/AllocatorAwareContainer) concept. It has been tested with MS VC++ 2015, GCC 4.8, GCC 4.9, and recent versions of clang. Note that `std::regex` isn't fully implemented in GCC 4.8., so `jsoncons_ext/jsonpath` regular expression filters aren't supported for that compiler.
+Compared to other JSON libraries, jsoncons has been designed to handle very large JSON texts. At its heart are
+SAX style parsers and serializers. Its [json parser](https://github.com/danielaparker/jsoncons/blob/master/doc/ref/json_parser.md) is an 
+incremental parser that can be fed its input in chunks, and does not require an entire file to be loaded in memory at one time. 
+Its unpacked in-memory representation of JSON is more compact than most, and can be made more compact still with a user-supplied
+allocator. It also supports memory efficient parsing of very large JSON texts with a [pull parser](https://github.com/danielaparker/jsoncons/blob/master/doc/ref/json_stream_reader.md),
+built on top of its incremental parser.  
 
 The jsoncons library is header-only: it consists solely of header files containing templates and inline functions, and requires no separately-compiled library binaries when linking. It has no dependence on other libraries. 
 
-To install the jsoncons library, download the zip file, extract the zipped files, and copy the directory `include/jsoncons` to your `include` directory. If you wish to use extensions, copy `include/jsoncons_ext` as well. 
+To install the librray, download the [latest release](https://github.com/danielaparker/jsoncons/releases) and unpack the zip file. Copy the directory `include/jsoncons` to your `include` directory. If you wish to use extensions, copy `include/jsoncons_ext` as well. 
+
+Or, download the latest code on [master](https://github.com/danielaparker/jsoncons/archive/master.zip).
 
 The jsoncons classes and functions are in namespace `jsoncons`. You need to include the header file
 ```c++ 
@@ -917,4 +922,5 @@ Output:
 }
 ```
 
+For more information, consult the latest [documentation](https://github.com/danielaparker/jsoncons/blob/master/doc/Home.md) and [roadmap](https://github.com/danielaparker/jsoncons/blob/master/doc/Roadmap.md). 
 

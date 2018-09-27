@@ -569,14 +569,16 @@ public:
     template <typename Traits,typename SAllocator>
     void dump(std::basic_string<char,Traits,SAllocator>& s) const
     {
-        basic_json_serializer<char,jsoncons::detail::string_writer<char_type>> serializer(s);
+        typedef std::basic_string<char,Traits,SAllocator> string_type;
+        basic_json_serializer<char,jsoncons::detail::string_writer<string_type>> serializer(s);
         dump(serializer);
     }
 
     template <typename Traits,typename SAllocator>
     void dump(std::basic_string<char,Traits,SAllocator>& s, indenting line_indent) const
     {
-        basic_json_serializer<char,jsoncons::detail::string_writer<char_type>> serializer(s, line_indent);
+        typedef std::basic_string<char,Traits,SAllocator> string_type;
+        basic_json_serializer<char,string_type> serializer(s, line_indent);
         dump(serializer);
     }
 
@@ -584,7 +586,8 @@ public:
     void dump(std::basic_string<char,Traits,SAllocator>& s,
               const json_serializing_options& options) const
     {
-        basic_json_serializer<char,jsoncons::detail::string_writer<char_type>> serializer(s, options);
+        typedef std::basic_string<char,Traits,SAllocator> string_type;
+        basic_json_serializer<char,jsoncons::detail::string_writer<string_type>> serializer(s, options);
         dump(serializer);
     }
 
@@ -593,7 +596,8 @@ public:
               const json_serializing_options& options,
               indenting line_indent) const
     {
-        basic_json_serializer<char,jsoncons::detail::string_writer<char_type>> serializer(s, options, line_indent);
+        typedef std::basic_string<char,Traits,SAllocator> string_type;
+        basic_json_serializer<char,jsoncons::detail::string_writer<string_type>> serializer(s, options, line_indent);
         dump(serializer);
     }
 
@@ -622,13 +626,6 @@ public:
     }
 
     void dump(json_content_handler& handler) const
-    {
-        handler.begin_document();
-        dump_fragment(handler);
-        handler.end_document();
-    }
-
-    void dump_fragment(json_content_handler& handler) const
     {
         // If it's a non indefinite length string, dump view
         // If it's an indefinite length string, dump view
@@ -767,6 +764,7 @@ public:
                 break;
             }
         }
+        handler.flush();
     }
 
     friend std::ostream& operator<<(std::ostream& os, const cbor_view& bv)
@@ -774,7 +772,13 @@ public:
         bv.dump(os);
         return os;
     }
+#if !defined(JSONCONS_NO_DEPRECATED)
 
+    void dump_fragment(json_content_handler& handler) const
+    {
+        dump(handler);
+    }
+#endif
 };
 // decode_cbor
 

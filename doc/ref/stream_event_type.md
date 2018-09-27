@@ -1,21 +1,20 @@
-### jsoncons::json_event_type
+### jsoncons::stream_event_type
 
 #### Header
 ```c++
-#include <jsoncons/json_event_reader.hpp>
+#include <jsoncons/stream_reader.hpp>
 ```
 
 ```c++
-enum class json_event_type
+enum class stream_event_type
 {
-    begin_document,
-    end_document,
     begin_object,
     end_object,
     begin_array,
     end_array,
     name,
     string_value,
+    byte_string_value,
     bignum_value,
     int64_value,
     uint64_value,

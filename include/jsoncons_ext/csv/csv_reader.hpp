@@ -44,13 +44,14 @@ class basic_csv_reader
     basic_csv_reader(const basic_csv_reader&) = delete; 
     basic_csv_reader& operator = (const basic_csv_reader&) = delete; 
 
+    default_parse_error_handler default_err_handler_;
+
     basic_csv_parser<CharT,Allocator> parser_;
     std::basic_istream<CharT>& is_;
     std::vector<CharT,char_allocator_type> buffer_;
     size_t buffer_length_;
     size_t buffer_position_;
     bool eof_;
-    size_t index_;
 public:
     // Structural characters
     static const size_t default_max_buffer_length = 16384;
@@ -62,55 +63,44 @@ public:
     basic_csv_reader(std::basic_istream<CharT>& is,
                      basic_json_content_handler<CharT>& handler)
 
-       : parser_(handler),
-         is_(is),
-         buffer_length_(default_max_buffer_length),
-         buffer_position_(0),
-         eof_(false),
-         index_(0)
+       : basic_csv_reader(is, 
+                          handler, 
+                          basic_csv_serializing_options<CharT,Allocator>(), 
+                          default_err_handler_)
     {
-        buffer_.reserve(buffer_length_);
     }
 
     basic_csv_reader(std::basic_istream<CharT>& is,
                      basic_json_content_handler<CharT>& handler,
-                     basic_csv_serializing_options<CharT,Allocator> options)
+                     const basic_csv_serializing_options<CharT,Allocator>& options)
 
-       : parser_(handler,options),
-         is_(is),
-         buffer_length_(default_max_buffer_length),
-         buffer_position_(0),
-         eof_(false),
-         index_(0)
+        : basic_csv_reader(is, 
+                           handler, 
+                           options, 
+                           default_err_handler_)
     {
-        buffer_.reserve(buffer_length_);
     }
 
     basic_csv_reader(std::basic_istream<CharT>& is,
                      basic_json_content_handler<CharT>& handler,
                      parse_error_handler& err_handler)
-       :
-         parser_(handler,err_handler),
-         is_(is),
-         buffer_length_(default_max_buffer_length),
-         buffer_position_(0),
-         eof_(false),
-         index_(0)
+        : basic_csv_reader(is, 
+                           handler, 
+                           basic_csv_serializing_options<CharT,Allocator>(), 
+                           err_handler)
     {
-        buffer_.reserve(buffer_length_);
     }
 
     basic_csv_reader(std::basic_istream<CharT>& is,
                      basic_json_content_handler<CharT>& handler,
-                     parse_error_handler& err_handler,
-                     basic_csv_serializing_options<CharT,Allocator> options)
+                     basic_csv_serializing_options<CharT,Allocator> options,
+                     parse_error_handler& err_handler)
        :
-         parser_(handler,err_handler,options),
+         parser_(handler, options, err_handler),
          is_(is),
          buffer_length_(default_max_buffer_length),
          buffer_position_(0),
-         eof_(false),
-         index_(0)
+         eof_(false)
     {
         buffer_.reserve(buffer_length_);
     }
@@ -121,10 +111,20 @@ public:
 
     void read()
     {
-        parser_.reset();
-        while (!eof_ && !parser_.done())
+        std::error_code ec;
+        read(ec);
+        if (ec)
         {
-            if (!(index_ < buffer_.size()))
+            throw parse_error(ec,parser_.line_number(),parser_.column_number());
+        }
+    }
+
+    void read(std::error_code& ec)
+    {
+        parser_.reset();
+        while (!parser_.stopped())
+        {
+            if (parser_.source_exhausted())
             {
                 if (!is_.eof())
                 {
@@ -136,20 +136,17 @@ public:
                     {
                         eof_ = true;
                     }
-                    index_ = 0;
+                    parser_.update(buffer_.data(),buffer_.size());
                 }
                 else
                 {
+                    parser_.update(buffer_.data(),0);
                     eof_ = true;
                 }
             }
-            if (!eof_)
-            {
-                parser_.parse(buffer_.data(),index_,buffer_.size());
-                index_ = parser_.index();
-            }
+            parser_.parse_some(ec);
+            if (ec) return;
         }
-        parser_.end_parse();
     }
 
     bool eof() const
@@ -202,7 +199,8 @@ Json decode_csv(typename Json::string_view_type s, const basic_csv_serializing_o
 
     basic_csv_parser<typename Json::char_type,Allocator> parser(decoder, options);
     parser.reset();
-    parser.parse(s.data(), 0, s.size());
+    parser.update(s.data(), s.size());
+    parser.parse_some();
     parser.end_parse();
     return decoder.get_result();
 }
