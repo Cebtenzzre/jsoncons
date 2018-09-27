@@ -54,4 +54,4 @@ load of misaligned addresses, and verifying fix
 Tobias Hermann, for reporting issue with `UINT_MAX` not declared 
 in `bignum.hpp`, and proposing fix.
 
-
+Joshua Pritikin, for addressing issue with `decode_half` function.
